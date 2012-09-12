@@ -172,7 +172,8 @@ static int exynos_drm_encoder_set_property(struct drm_encoder *encoder,
 			return ret;
 	}
 
-	return drm_object_property_set_value(&encoder->base, property, val);
+	return drm_object_property_set_value(&encoder->base, &encoder->propvals,
+			property, val, blob_data);
 }
 
 static void exynos_drm_encoder_destroy(struct drm_encoder *encoder)

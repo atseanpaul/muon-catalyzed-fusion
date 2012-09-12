@@ -811,7 +811,8 @@ static int anx7808_get_ds_video_status(struct anx7808_data *anx7808)
 static void anx7808_update_hdcp_property(struct anx7808_data *anx7808,
 		bool enabled)
 {
-	struct drm_device *dev = anx7808->connector.dev;
+	struct drm_connector *connector = &anx7808->connector;
+	struct drm_device *dev = connector->dev;
 	uint64_t val = DRM_MODE_CONTENT_PROTECTION_OFF;
 
 	if (enabled)
@@ -819,8 +820,9 @@ static void anx7808_update_hdcp_property(struct anx7808_data *anx7808,
 	else if (anx7808->hdcp_desired)
 		val = DRM_MODE_CONTENT_PROTECTION_DESIRED;
 
-	drm_object_property_set_value(&anx7808->connector.base,
-			dev->mode_config.content_protection_property, val);
+	drm_object_property_set_value(&connector->base, &connector->propvals,
+			dev->mode_config.content_protection_property, val,
+			NULL);
 }
 
 static int anx7808_power_on_hdcp(struct anx7808_data *anx7808)
