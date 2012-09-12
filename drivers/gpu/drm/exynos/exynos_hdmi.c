@@ -1395,8 +1395,9 @@ static int hdcp_update_drm_property(struct hdmi_context *hdata, int value)
 	list_for_each_entry(connector, &mode_config->connector_list, head) {
 		if (connector->connector_type == DRM_MODE_CONNECTOR_HDMIA)
 			return drm_object_property_set_value(&connector->base,
+				&connector->propvals,
 				mode_config->content_protection_property,
-				value);
+				value, NULL);
 	}
 	return -ENODEV;
 }
@@ -1638,7 +1639,8 @@ static int hdmi_connector_set_property(struct drm_connector *connector,
 	if (ret)
 		return ret;
 
-	return drm_object_property_set_value(&connector->base, property, val);
+	return drm_object_property_set_value(&connector->base,
+			&connector->propvals, property, val, blob_data);
 }
 
 static struct drm_connector_funcs hdmi_connector_funcs = {
