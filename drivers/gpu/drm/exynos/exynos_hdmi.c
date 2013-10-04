@@ -1628,7 +1628,8 @@ static int set_property(struct hdmi_context *hdata,
 }
 
 static int hdmi_connector_set_property(struct drm_connector *connector,
-		struct drm_property *property, uint64_t val)
+		void *state, struct drm_property *property, uint64_t val,
+		void *blob_data)
 {
 	struct hdmi_context *hdata = ctx_from_connector(connector);
 	int ret;
