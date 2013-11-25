@@ -747,6 +747,7 @@ struct drm_prime_handle {
 #define DRM_IOCTL_MODE_ADDFB2		DRM_IOWR(0xB8, struct drm_mode_fb_cmd2)
 #define DRM_IOCTL_MODE_OBJ_GETPROPERTIES	DRM_IOWR(0xB9, struct drm_mode_obj_get_properties)
 #define DRM_IOCTL_MODE_OBJ_SETPROPERTY	DRM_IOWR(0xBA, struct drm_mode_obj_set_property)
+#define DRM_IOCTL_MODE_ATOMIC		DRM_IOWR(0xBC, struct drm_mode_atomic)
 
 /**
  * Device specific ioctls should only be in their respective headers
@@ -798,6 +799,17 @@ struct drm_event_vblank {
 
 #define DRM_PRIME_CAP_IMPORT 0x1
 #define DRM_PRIME_CAP_EXPORT 0x2
+
+struct drm_event_atomic {
+	struct drm_event base;
+	__u64 user_data;
+	__u32 tv_sec;
+	__u32 tv_usec;
+	__u32 sequence;
+	__u32 obj_id;
+	__u32 old_fb_id;
+	__u32 reserved;
+};
 
 /* typedef area */
 #ifndef __KERNEL__
