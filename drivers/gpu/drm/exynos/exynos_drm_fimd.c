@@ -12,6 +12,7 @@
  *
  */
 #include <drm/drmP.h>
+#include <drm/drm_atomic.h>
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -472,6 +473,7 @@ static int fimd_plane_disable(struct drm_plane *plane)
 static const struct drm_plane_funcs fimd_plane_funcs = {
 	.update_plane = fimd_plane_update,
 	.disable_plane = fimd_plane_disable,
+	.set_property = drm_atomic_plane_set_property,
 	.destroy = drm_plane_cleanup,
 };
 

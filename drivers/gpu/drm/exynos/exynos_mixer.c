@@ -16,6 +16,7 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_atomic.h>
 
 #include "regs-mixer.h"
 #include "regs-vp.h"
@@ -1076,6 +1077,7 @@ int mixer_plane_disable(struct drm_plane *plane)
 static const struct drm_plane_funcs mixer_plane_funcs = {
 	.update_plane = mixer_plane_update,
 	.disable_plane = mixer_plane_disable,
+	.set_property = drm_atomic_plane_set_property,
 	.destroy = drm_plane_cleanup,
 };
 

@@ -20,6 +20,7 @@
 
 #include <drm/drm_edid.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_atomic.h>
 
 #include "exynos_drm_drv.h"
 #include "exynos_drm_fb.h"
@@ -238,6 +239,7 @@ static void vidi_plane_destroy(struct drm_plane *plane)
 const struct drm_plane_funcs vidi_plane_funcs = {
 	.update_plane = vidi_plane_update,
 	.disable_plane = vidi_plane_disable,
+	.set_property = drm_atomic_plane_set_property,
 	.destroy = vidi_plane_destroy,
 };
 

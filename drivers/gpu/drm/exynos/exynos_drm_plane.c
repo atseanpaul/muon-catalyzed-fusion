@@ -10,6 +10,7 @@
  */
 
 #include <drm/drmP.h>
+#include <drm/drm_atomic.h>
 
 #include <drm/exynos_drm.h>
 #include "exynos_drm_drv.h"
