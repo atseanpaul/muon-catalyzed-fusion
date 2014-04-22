@@ -33,6 +33,7 @@
 #include <linux/vgaarb.h>
 #include <drm/drm_edid.h>
 #include <drm/drmP.h>
+#include <drm/drm_crtc.h>
 #include "intel_drv.h"
 #include <drm/i915_drm.h>
 #include "i915_drv.h"
