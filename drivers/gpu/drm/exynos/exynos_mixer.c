@@ -729,28 +729,11 @@ static void mixer_graph_buffer(struct mixer_context *ctx, int win)
 	unsigned int x_ratio, y_ratio;
 	unsigned int src_x_offset, src_y_offset, dst_x_offset, dst_y_offset;
 	dma_addr_t dma_addr;
-	unsigned int fmt;
 	u32 val;
 
 	DRM_DEBUG_KMS("[WIN:%d]\n", win);
 
 	win_data = &ctx->win_data[win];
-
-	#define RGB565 4
-	#define ARGB1555 5
-	#define ARGB4444 6
-	#define ARGB8888 7
-
-	switch (win_data->bpp) {
-	case 16:
-		fmt = ARGB4444;
-		break;
-	case 32:
-		fmt = ARGB8888;
-		break;
-	default:
-		fmt = ARGB8888;
-	}
 
 	/* 2x scaling feature */
 	x_ratio = 0;
@@ -771,13 +754,21 @@ static void mixer_graph_buffer(struct mixer_context *ctx, int win)
 	else
 		ctx->interlace = false;
 
-	spin_lock_irqsave(&res->reg_slock, flags);
+	/* setup format */
+	if (win_data->bpp == 16) {
+		val = MXR_GRP_CFG_FORMAT_ARGB4444;
+	} else if (win_data->bpp == 32) {
+		val = MXR_GRP_CFG_FORMAT_ARGB8888;
+	} else {
+		WARN_ON(1);
+		return;
+	}
 
+	spin_lock_irqsave(&res->reg_slock, flags);
 	mixer_vsync_set_update(ctx, false);
 
-	/* setup format */
 	mixer_reg_writemask(res, MXR_GRAPHIC_CFG(win),
-		MXR_GRP_CFG_FORMAT_VAL(fmt), MXR_GRP_CFG_FORMAT_MASK);
+		MXR_GRP_CFG_FORMAT_VAL(val), MXR_GRP_CFG_FORMAT_MASK);
 
 	/* setup geometry */
 	mixer_reg_write(res, MXR_GRAPHIC_SPAN(win), win_data->fb_width);
