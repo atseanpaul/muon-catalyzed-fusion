@@ -751,7 +751,7 @@ int drm_crtc_init_with_planes(struct drm_device *dev, struct drm_crtc *crtc,
 	crtc->base.propvals = &crtc->state->propvals;
 
 	list_add_tail(&crtc->head, &dev->mode_config.crtc_list);
-	dev->mode_config.num_crtc++;
+	crtc->id = dev->mode_config.num_crtc++;
 
 	crtc->primary = primary;
 	if (primary)
@@ -866,7 +866,7 @@ static int check_connectors(struct drm_crtc *crtc, void *state, bool fix,
 		if (ocrtc == crtc)
 			continue;
 
-		ostate = drm_atomic_get_crtc_state(crtc, state);
+		ostate = drm_atomic_get_crtc_state(ocrtc, state);
 		if (IS_ERR(ostate))
 			return PTR_ERR(ostate);
 
@@ -895,7 +895,6 @@ retry:
 			return -EINVAL;
 		}
 	}
-
 	return 0;
 }
 
@@ -915,6 +914,10 @@ int drm_crtc_check_state(struct drm_crtc *crtc,
 
 	/* disabling the crtc is allowed: */
 	if (!(fb && state->mode_valid))
+		return 0;
+
+	/* We're not committing this state, ignore */
+	if (!state->commit_state)
 		return 0;
 
 	hdisplay = state->mode.hdisplay;
@@ -982,6 +985,7 @@ int drm_crtc_set_property(struct drm_crtc *crtc,
 	/* grab primary plane state now, to ensure locks are held, etc. */
 	drm_atomic_get_plane_state(crtc->primary, state->state);
 
+	state->commit_state = true;
 	drm_object_property_set_value(&crtc->base,
 			&state->propvals, property, value, blob_data);
 
@@ -993,6 +997,7 @@ int drm_crtc_set_property(struct drm_crtc *crtc,
 			/* check size: */
 			if (value < sizeof(struct drm_mode_modeinfo))
 				return -EINVAL;
+
 			state->mode = *(struct drm_mode_modeinfo *)blob_data;
 			state->mode_valid = true;
 		}
@@ -1431,6 +1436,7 @@ int drm_plane_set_property(struct drm_plane *plane,
 	} else if (property == config->prop_crtc_id) {
 		struct drm_mode_object *obj = drm_property_get_obj(property, value);
 		struct drm_crtc *crtc = obj ? obj_to_crtc(obj) : NULL;
+
 		/* take the lock of the incoming crtc as well, moving
 		 * plane between crtcs is synchronized on both incoming
 		 * and outgoing crtc.
