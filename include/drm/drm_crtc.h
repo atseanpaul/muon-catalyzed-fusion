@@ -481,6 +481,7 @@ struct drm_crtc_state {
 	/* transient state, only valid during atomic operation: */
 	bool set_config        : 1;
 	bool connectors_change : 1;
+	bool commit_state      : 1;
 
 	uint8_t num_connector_ids;
 	uint32_t *connector_ids;
