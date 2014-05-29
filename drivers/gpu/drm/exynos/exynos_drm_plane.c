@@ -12,8 +12,19 @@
 #include <drm/drmP.h>
 #include <drm/drm_atomic.h>
 
+#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+#include <linux/dma-buf.h>
+#include <linux/kds.h>
+#include <linux/kfifo.h>
+#endif
+
 #include <drm/exynos_drm.h>
 #include "exynos_drm_drv.h"
+#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+#include "exynos_drm_fb.h"
+#include "exynos_drm_gem.h"
+#endif
+#include "exynos_trace.h"
 
 /*
  * This function is to get X or Y size shown via screen. This needs length and
@@ -89,4 +100,210 @@ void exynos_plane_copy_state(struct exynos_drm_plane *src,
 	dst->src_y = src->src_y;
 	dst->src_w = src->src_w;
 	dst->src_h = src->src_h;
+}
+
+struct kds_callback_cookie {
+	struct drm_plane *plane;
+	struct drm_crtc *crtc;
+	struct drm_framebuffer *fb;
+};
+
+static int exynos_plane_update(struct drm_plane *plane, struct drm_crtc *crtc,
+			struct drm_framebuffer *fb,
+			void (*plane_commit_cb)(void *cb, void *cb_extra))
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+	int ret;
+	struct exynos_drm_fb *exynos_fb = to_exynos_fb(fb);
+	struct exynos_drm_gem_obj *exynos_gem_obj;
+	struct dma_buf *buf;
+	struct kds_resource *res_list;
+	struct kds_callback_cookie *cookie;
+	unsigned long shared = 0UL;
+#endif
+
+	WARN_ON(!mutex_is_locked(&exynos_plane->pending_lock));
+
+	cookie = kzalloc(sizeof(*cookie), GFP_KERNEL);
+	if (!cookie) {
+		DRM_ERROR("Failed to allocate kds cookie\n");
+		return -ENOMEM;
+	}
+	cookie->plane = plane;
+	cookie->crtc = crtc;
+	cookie->fb = fb;
+
+	/* This reference is released once the fb is removed from the screen */
+	drm_framebuffer_reference(fb);
+
+#ifndef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+	/* If we don't have kds synchronization, just put the fb on the plane */
+	plane_commit_cb(cookie, NULL);
+	return 0;
+
+#else
+	BUG_ON(exynos_plane->kds);
+
+	exynos_gem_obj = exynos_drm_fb_obj(exynos_fb, 0);
+	if (!exynos_gem_obj->base.dma_buf) {
+		plane_commit_cb(cookie, NULL);
+		return 0;
+	}
+
+	ret = kds_callback_init(&exynos_plane->kds_cb, 1, plane_commit_cb);
+	if (ret) {
+		DRM_ERROR("Failed to initialize kds callback ret=%d\n", ret);
+		return ret;
+	}
+
+	buf = exynos_gem_obj->base.dma_buf;
+	res_list = get_dma_buf_kds_resource(buf);
+
+	exynos_drm_fb_attach_dma_buf(exynos_fb, buf);
+
+	/* Waiting for the KDS resource*/
+	trace_exynos_page_flip_state(crtc->id, DRM_BASE_ID(fb), "wait_kds");
+
+	ret = kds_async_waitall(&exynos_plane->kds, &exynos_plane->kds_cb,
+			cookie, NULL, 1, &shared, &res_list);
+	if (ret) {
+		DRM_ERROR("Failed kds waitall ret=%d\n", ret);
+		return ret;
+	}
+
+	return 0;
+#endif
+}
+
+static void exynos_drm_crtc_send_event(struct drm_plane *plane, int pipe)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	struct drm_pending_vblank_event *event = exynos_plane->pending_event;
+	unsigned long flags;
+	struct timeval now;
+
+	if (!exynos_plane->pending_event)
+		return;
+
+	do_gettimeofday(&now);
+
+	spin_lock_irqsave(&plane->dev->event_lock, flags);
+
+	event->pipe = pipe;
+	event->event.sequence = 0;
+	event->event.tv_sec = now.tv_sec;
+	event->event.tv_usec = now.tv_usec;
+	list_add_tail(&event->base.link, &event->base.file_priv->event_list);
+
+	spin_unlock_irqrestore(&plane->dev->event_lock, flags);
+	wake_up_interruptible(&event->base.file_priv->event_wait);
+
+	exynos_plane->pending_event = NULL;
+}
+
+void exynos_plane_helper_finish_update(struct drm_plane *plane, int pipe)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	struct drm_framebuffer *old_fb;
+
+	WARN_ON(!mutex_is_locked(&exynos_plane->pending_lock));
+
+	old_fb = exynos_plane->fb;
+
+#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+	if (exynos_plane->kds) {
+		kds_resource_set_release(&exynos_plane->kds);
+		exynos_plane->kds = NULL;
+	}
+
+	if (exynos_plane->kds_cb.user_cb)
+		kds_callback_term(&exynos_plane->kds_cb);
+#endif
+
+	exynos_plane->fb = exynos_plane->pending_fb;
+	exynos_plane->pending_fb = NULL;
+
+	if (pipe)
+		exynos_drm_crtc_send_event(plane, pipe);
+
+	if (old_fb)
+		drm_framebuffer_unreference(old_fb);
+
+	mutex_unlock(&exynos_plane->pending_lock);
+}
+
+static void exynos_plane_helper_commit_cb(void *cookie, void *unused)
+{
+	struct kds_callback_cookie *kds_cookie = cookie;
+	struct drm_plane *plane = kds_cookie->plane;
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	struct drm_framebuffer *fb = kds_cookie->fb;
+	struct drm_crtc *crtc = kds_cookie->crtc;
+
+	exynos_plane->helper_funcs->commit_plane(plane, crtc, fb);
+
+	/* If the fb is already on the screen, finish the commit early */
+	if (exynos_plane->fb == fb)
+		exynos_plane_helper_finish_update(&exynos_plane->base,
+			crtc->id);
+
+	kfree(kds_cookie);
+}
+
+int exynos_plane_helper_update_plane(struct drm_plane *plane,
+		struct drm_crtc *crtc, struct drm_framebuffer *fb, int crtc_x,
+		int crtc_y, unsigned int crtc_w, unsigned int crtc_h,
+		uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	struct exynos_drm_plane old_plane;
+	int ret;
+
+	exynos_plane_copy_state(exynos_plane, &old_plane);
+
+	mutex_lock(&exynos_plane->pending_lock);
+
+	/* Copy the plane parameters so we can restore it later */
+	exynos_plane->crtc_x = crtc_x;
+	exynos_plane->crtc_y = crtc_y;
+	exynos_plane->crtc_w = crtc_w;
+	exynos_plane->crtc_h = crtc_h;
+	exynos_plane->src_x = src_x >> 16;
+	exynos_plane->src_y = src_y >> 16;
+	exynos_plane->src_w = src_w >> 16;
+	exynos_plane->src_h = src_h >> 16;
+	exynos_plane->pending_fb = fb;
+
+	exynos_sanitize_plane_coords(plane, crtc);
+
+	ret = exynos_plane_update(plane, crtc, fb,
+			exynos_plane_helper_commit_cb);
+
+	/* restore old plane on failure*/
+	if (ret)
+		exynos_plane_copy_state(&old_plane, exynos_plane);
+
+	return ret;
+}
+
+int exynos_plane_helper_disable_plane(struct drm_plane *plane)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+
+	mutex_lock(&exynos_plane->pending_lock);
+
+	/* We shouldn't have anything pending at this point */
+	BUG_ON(exynos_plane->pending_fb);
+
+	if (!exynos_plane->fb)
+		goto out;
+
+	exynos_plane->helper_funcs->disable_plane(plane);
+
+out:
+	/* Finish any updates that were unfinished and clean up references */
+	exynos_plane_helper_finish_update(plane, 0);
+
+	return 0;
 }

@@ -79,6 +79,13 @@ enum exynos_drm_output_type {
 
 const char *exynos_drm_output_type_name(enum exynos_drm_output_type type);
 
+
+struct exynos_plane_helper_funcs {
+	void (*commit_plane)(struct drm_plane *plane, struct drm_crtc *crtc,
+				struct drm_framebuffer *fb);
+	int (*disable_plane)(struct drm_plane *plane);
+};
+
 struct exynos_drm_plane {
 	struct drm_plane base;
 
@@ -92,13 +99,38 @@ struct exynos_drm_plane {
 	uint32_t src_y;
 	uint32_t src_w;
 	uint32_t src_h;
+
+	struct mutex pending_lock;
+	struct drm_framebuffer *fb;
+	struct drm_framebuffer *pending_fb;
+	struct drm_pending_vblank_event *pending_event;
+#ifdef CONFIG_DMA_SHARED_BUFFER_USES_KDS
+	struct kds_resource_set *kds;
+	struct kds_callback kds_cb;
+#endif
+
+	const struct exynos_plane_helper_funcs *helper_funcs;
 };
 #define to_exynos_plane(x) container_of(x, struct exynos_drm_plane, base)
+
+static inline void exynos_plane_helper_add(struct drm_plane *plane,
+			const struct exynos_plane_helper_funcs *funcs)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	exynos_plane->helper_funcs = funcs;
+}
 
 void exynos_plane_copy_state(struct exynos_drm_plane *src,
 		struct exynos_drm_plane *dst);
 void exynos_sanitize_plane_coords(struct drm_plane *plane,
 		struct drm_crtc *crtc);
+
+int exynos_plane_helper_update_plane(struct drm_plane *plane,
+		struct drm_crtc *crtc, struct drm_framebuffer *fb, int crtc_x,
+		int crtc_y, unsigned int crtc_w, unsigned int crtc_h,
+		uint32_t src_x, uint32_t src_y, uint32_t src_w, uint32_t src_h);
+void exynos_plane_helper_finish_update(struct drm_plane *plane, int pipe);
+int exynos_plane_helper_disable_plane(struct drm_plane *plane);
 
 /*
  * Exynos drm common overlay structure.
