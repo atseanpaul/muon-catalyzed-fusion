@@ -224,7 +224,7 @@ void exynos_plane_helper_finish_update(struct drm_plane *plane, int pipe)
 	exynos_plane->fb = exynos_plane->pending_fb;
 	exynos_plane->pending_fb = NULL;
 
-	if (pipe)
+	if (pipe >= 0)
 		exynos_drm_crtc_send_event(plane, pipe);
 
 	if (old_fb)
@@ -241,7 +241,11 @@ static void exynos_plane_helper_commit_cb(void *cookie, void *unused)
 	struct drm_framebuffer *fb = kds_cookie->fb;
 	struct drm_crtc *crtc = kds_cookie->crtc;
 
+	WARN_ON(!mutex_is_locked(&exynos_plane->pending_lock));
+
 	exynos_plane->helper_funcs->commit_plane(plane, crtc, fb);
+
+	exynos_plane->pending_fb = fb;
 
 	/* If the fb is already on the screen, finish the commit early */
 	if (exynos_plane->fb == fb)
@@ -249,6 +253,47 @@ static void exynos_plane_helper_commit_cb(void *cookie, void *unused)
 			crtc->id);
 
 	kfree(kds_cookie);
+}
+
+int exynos_plane_helper_freeze_plane(struct drm_plane *plane)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	int ret;
+
+	mutex_lock(&exynos_plane->pending_lock);
+
+	ret = exynos_plane->helper_funcs->disable_plane(plane);
+
+	mutex_unlock(&exynos_plane->pending_lock);
+
+	return ret;
+}
+
+void exynos_plane_helper_thaw_plane(struct drm_plane *plane,
+	struct drm_crtc *crtc)
+{
+	struct exynos_drm_plane *exynos_plane = to_exynos_plane(plane);
+	struct drm_framebuffer *fb;
+
+	mutex_lock(&exynos_plane->pending_lock);
+
+	fb = exynos_plane->fb;
+
+	/* If the plane has an fb, commit it and then set it as pending so we
+	 * don't release the pending lock until it's actually up on the screen.
+	 * Otherwise, it should just stay disabled and we'll release the lock
+	 * immediately.
+	 */
+	if (fb) {
+		exynos_plane->helper_funcs->commit_plane(plane, crtc, fb);
+
+		/* Take a reference here since we'll drop it in finish_update */
+		drm_framebuffer_reference(fb);
+
+		exynos_plane->pending_fb = fb;
+	} else {
+		mutex_unlock(&exynos_plane->pending_lock);
+	}
 }
 
 int exynos_plane_helper_update_plane(struct drm_plane *plane,
@@ -273,14 +318,12 @@ int exynos_plane_helper_update_plane(struct drm_plane *plane,
 	exynos_plane->src_y = src_y >> 16;
 	exynos_plane->src_w = src_w >> 16;
 	exynos_plane->src_h = src_h >> 16;
-	exynos_plane->pending_fb = fb;
 
 	exynos_sanitize_plane_coords(plane, crtc);
 
 	ret = exynos_plane_update(plane, crtc, fb,
 			exynos_plane_helper_commit_cb);
 
-	/* restore old plane on failure*/
 	if (ret)
 		exynos_plane_copy_state(&old_plane, exynos_plane);
 
@@ -303,7 +346,8 @@ int exynos_plane_helper_disable_plane(struct drm_plane *plane)
 
 out:
 	/* Finish any updates that were unfinished and clean up references */
-	exynos_plane_helper_finish_update(plane, 0);
+	exynos_plane_helper_finish_update(plane,
+		plane->crtc ? plane->crtc->id : -1);
 
 	return 0;
 }
