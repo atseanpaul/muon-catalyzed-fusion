@@ -198,6 +198,10 @@ int drm_err(const char *func, const char *format, ...);
 #define DRM_INFO(fmt, ...)				\
 	printk(KERN_INFO "[" DRM_NAME "] " fmt, ##__VA_ARGS__)
 
+#define DRM_SP(fmt, ...)				\
+	printk(KERN_ERR "[sp" DRM_NAME ":%s:%d] " fmt, __func__, __LINE__, \
+		##__VA_ARGS__)
+
 /**
  * Debug output.
  *
